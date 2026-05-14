@@ -1,71 +1,82 @@
 const https = require('https');
 const http = require('http');
-const url = require('url');
 const fs = require('fs');
 const path = require('path');
 
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbwe2jOB0tDgPTEHsdB9tBo0tiFsKqCxilMEthAkg23he_4d9egprgLzoAcZPwfkq9MUIA/exec';
 const PORT = process.env.PORT || 3000;
 
-const MIME = {
-  '.html': 'text/html',
-  '.js': 'text/javascript',
-  '.css': 'text/css',
-  '.json': 'application/json',
-};
-
-function corsHeaders(res) {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+function httpsGet(url, redirects) {
+  redirects = redirects || 0;
+  if (redirects > 5) return Promise.reject(new Error('Too many redirects'));
+  return new Promise((resolve, reject) => {
+    https.get(url, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        resolve(httpsGet(res.headers.location, redirects + 1));
+        return;
+      }
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data));
+    }).on('error', reject);
+  });
 }
 
 const server = http.createServer((req, res) => {
-  const parsed = url.parse(req.url, true);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
 
-  // CORS preflight
   if (req.method === 'OPTIONS') {
-    corsHeaders(res);
     res.writeHead(204);
     res.end();
     return;
   }
 
-  // Proxy para o Google Apps Script
-  if (parsed.pathname === '/api') {
-    corsHeaders(res);
-    const qs = Object.keys(parsed.query)
-      .map(k => k + '=' + encodeURIComponent(parsed.query[k]))
-      .join('&');
-    const target = SCRIPT_URL + '?' + qs;
+  const reqUrl = new URL(req.url, 'http://localhost');
 
-    https.get(target, (gsRes) => {
-      let data = '';
-      gsRes.on('data', chunk => data += chunk);
-      gsRes.on('end', () => {
+  if (reqUrl.pathname === '/api') {
+    const qs = reqUrl.search;
+    const target = SCRIPT_URL + qs;
+    httpsGet(target)
+      .then(data => {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(data);
+      })
+      .catch(e => {
+        res.writeHead(500);
+        res.end(JSON.stringify({ ok: false, erro: e.message }));
       });
-    }).on('error', (e) => {
-      res.writeHead(500);
-      res.end(JSON.stringify({ ok: false, erro: e.message }));
+    return;
+  }
+
+  // POST para /api
+  if (req.method === 'POST' && reqUrl.pathname === '/api') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', () => {
+      const action = reqUrl.searchParams.get('action') || '';
+      const target = SCRIPT_URL + '?action=' + action + '&dados=' + encodeURIComponent(body);
+      httpsGet(target)
+        .then(data => {
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(data);
+        })
+        .catch(e => {
+          res.writeHead(500);
+          res.end(JSON.stringify({ ok: false, erro: e.message }));
+        });
     });
     return;
   }
 
-  // Serve o index.html para qualquer outra rota
+  // Serve index.html
   const filePath = path.join(__dirname, 'index.html');
   fs.readFile(filePath, (err, data) => {
-    if (err) {
-      res.writeHead(404);
-      res.end('Not found');
-      return;
-    }
+    if (err) { res.writeHead(404); res.end('Not found'); return; }
     res.writeHead(200, { 'Content-Type': 'text/html' });
     res.end(data);
   });
 });
 
-server.listen(PORT, () => {
-  console.log('PCP Cala Playa rodando na porta ' + PORT);
-});
+server.listen(PORT, () => console.log('PCP Cala Playa porta ' + PORT));

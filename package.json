@@ -1,0 +1,12 @@
+{
+  "name": "pcp-calaplaya",
+  "version": "1.0.0",
+  "description": "PCP Cala Playa — Sistema de Producao",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

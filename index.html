@@ -625,19 +625,12 @@ function setSyncStatus(online){
 var MODO_OFFLINE = false;
 
 function apiCall(action, payload){
-  if(MODO_OFFLINE){
-    setSyncStatus(false);
-    return Promise.resolve({ok:false, offline:true});
-  }
   setSyncStatus(true);
   var url = SCRIPT_URL + '?action=' + action;
-  return fetch(url, {
-    method: payload ? 'POST' : 'GET',
-    headers: {'Content-Type':'application/json'},
-    body: payload ? JSON.stringify(payload) : undefined
-  })
-  .then(function(r){return r.json()})
-  .catch(function(){setSyncStatus(false);return {ok:false,offline:true}});
+  if(payload) url += '&dados=' + encodeURIComponent(JSON.stringify(payload));
+  return fetch(url)
+    .then(function(r){return r.json()})
+    .catch(function(){setSyncStatus(false);return {ok:false,offline:true}});
 }
 
 /* ══ AUTENTICAÇÃO ══ */

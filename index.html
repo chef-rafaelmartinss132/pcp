@@ -621,55 +621,61 @@ function setSyncStatus(online){
   el.style.color = online ? 'var(--verde2)' : 'var(--cinza2)';
 }
 
-/* ══ API — GOOGLE APPS SCRIPT (GET para evitar CORS preflight) ══ */
+/* ══ API — GOOGLE APPS SCRIPT ══ */
 var MODO_OFFLINE = false;
 
 function apiCall(action, payload){
+  if(MODO_OFFLINE){
+    setSyncStatus(false);
+    return Promise.resolve({ok:false, offline:true});
+  }
   setSyncStatus(true);
   var url = SCRIPT_URL + '?action=' + action;
-  if(payload) url += '&dados=' + encodeURIComponent(JSON.stringify(payload));
-  return fetch(url, {method:'GET', mode:'no-cors'})
-    .then(function(){ return {ok:false, offline:true}; })
-    .catch(function(){ setSyncStatus(false); return {ok:false, offline:true}; });
+  return fetch(url, {
+    method: payload ? 'POST' : 'GET',
+    headers: {'Content-Type':'application/json'},
+    body: payload ? JSON.stringify(payload) : undefined
+  })
+  .then(function(r){return r.json()})
+  .catch(function(){setSyncStatus(false);return {ok:false,offline:true}});
 }
-
-function apiPost(action, payload){
-  setSyncStatus(true);
-  var url = SCRIPT_URL + '?action=' + action;
-  if(payload) url += '&dados=' + encodeURIComponent(JSON.stringify(payload));
-  var img = new Image();
-  img.src = url;
-  return Promise.resolve({ok:true, offline:false});
-}
-
-/* ══ USUÁRIOS — espelho local do Google Sheets ══ */
-var USERS_LOCAL = {
-  'chef@calaplaya.com':  {senha:'chef123', nome:'Chef Executivo',cargo:'chef_exec', unidade:'cala_playa'},
-  'sous@calaplaya.com':  {senha:'sous123', nome:'Sous Chef Demo', cargo:'sous_chef', unidade:'cala_playa'},
-  'turno@calaplaya.com': {senha:'turno123',nome:'Chef de Turno',  cargo:'chef_turno',unidade:'cala_playa'},
-  'almox@calaplaya.com': {senha:'almox123',nome:'Almoxarife Demo',cargo:'almoxarife',unidade:'cala_playa'},
-};
 
 /* ══ AUTENTICAÇÃO ══ */
 function entrar(){
   var email = (v('l-email').value||'').trim().toLowerCase();
   var senha = (v('l-senha').value||'').trim();
   v('login-err').textContent = '';
+
   if(!email||!senha){v('login-err').textContent='Preencha e-mail e senha.';return;}
 
-  // Carrega usuários salvos localmente (adicionados via Controle de Acesso)
-  var cache = lsGet('cp_users_local');
-  if(cache) Object.assign(USERS_LOCAL, cache);
-
-  var u = USERS_LOCAL[email];
-  if(u && u.senha === senha){
-    USER = {nome:u.nome, cargo:u.cargo, unidade:u.unidade, email:email};
-    lsSet('cp_pcp_session', USER);
-    setSyncStatus(false);
-    abrirApp();
-  } else {
-    v('login-err').textContent = 'E-mail ou senha incorretos.';
+  // Modo offline/demo: aceita credenciais de demonstração
+  if(MODO_OFFLINE){
+    var demoUsers = {
+      'chef@calaplaya.com': {senha:'chef123',nome:'Chef Executivo',cargo:'chef_exec',unidade:'cala_playa'},
+      'sous@calaplaya.com': {senha:'sous123',nome:'Sous Chef Demo',cargo:'sous_chef',unidade:'cala_playa'},
+      'turno@calaplaya.com':{senha:'turno123',nome:'Chef de Turno',cargo:'chef_turno',unidade:'cala_playa'},
+      'almox@calaplaya.com':{senha:'almox123',nome:'Almoxarife Demo',cargo:'almoxarife',unidade:'cala_playa'},
+    };
+    var demo = demoUsers[email];
+    if(demo && demo.senha === senha){
+      USER = {nome:demo.nome,cargo:demo.cargo,unidade:demo.unidade,email:email};
+      lsSet('cp_pcp_session', USER);
+      abrirApp();
+    } else {
+      v('login-err').textContent = 'Credenciais incorretas. No modo demo use: chef@calaplaya.com / chef123';
+    }
+    return;
   }
+
+  apiCall('login', {email, senha}).then(function(res){
+    if(res.ok && res.usuario){
+      USER = res.usuario;
+      lsSet('cp_pcp_session', USER);
+      abrirApp();
+    } else {
+      v('login-err').textContent = 'E-mail ou senha incorretos.';
+    }
+  });
 }
 
 function sair(){
